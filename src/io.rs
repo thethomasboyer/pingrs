@@ -11,14 +11,17 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
+
 use std::env;
 use std::net::{IpAddr, Ipv4Addr};
 
+/// Attempt to parse an IP adrress from the command-line arguments.
+/// A bit messy but seems to get the job done for now.
 pub fn parse_ip_from_cl() -> Result<IpAddr, String> {
     // collect CL args
     let args: Vec<String> = env::args().collect();
 
-    // get the first one as a &String
+    // get the first (second?) one as a &String
     let raw_addr: &String = args.get(1).expect("No CL argument given!");
 
     // parse it into a [u8; 4]
@@ -62,8 +65,4 @@ pub fn parse_ip_from_cl() -> Result<IpAddr, String> {
     // convert it to a std IP adress, for convenience and correctness
     let ip = IpAddr::V4(Ipv4Addr::from(valid_addr));
     Ok(ip)
-}
-
-pub fn ask_ip_to_user() -> IpAddr {
-    IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
 }
