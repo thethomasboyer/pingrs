@@ -41,7 +41,6 @@ impl ICMPPacket {
         if (tos != ECHO_REQUEST_TYPE && tos != ECHO_REPLY_TYPE) || code != ECHO_CODE {
             return None;
         } else {
-            println!("DEBUG ICMPPacket::new /// tos: {}, code: {}", tos, code);
             Some(ICMPPacket {
                 tos,
                 code,
@@ -52,14 +51,15 @@ impl ICMPPacket {
         }
     }
 
-    fn from_packet(packet: &[u8]) -> Option<Self> {
-        if packet.len() != 8 {return None} // wrong lenght of received packet
-        let identifier = concatenate_u8_into_u16(packet[5], packet[6]);
-        let sequence_number = concatenate_u8_into_u16(packet[7], packet[8]);
-        ICMPPacket::new(packet[1], packet[2], identifier, sequence_number)
+    pub fn from_packet(packet: &[u8]) -> Option<Self> {
+        if packet.len() != 8 {
+            return None;
+        } // wrong lenght of received packet
+        let identifier = concatenate_u8_into_u16(packet[4], packet[5]);
+        let sequence_number = concatenate_u8_into_u16(packet[6], packet[7]);
+        ICMPPacket::new(packet[0], packet[1], identifier, sequence_number)
     }
 }
-
 
 /// Concatenate a and b into a u16.
 //         a                     b
@@ -96,7 +96,7 @@ fn split_u16_into_u8(int: u16) -> [u8; 2] {
 fn restore_correct_order(p: &mut [u8]) -> &[u8] {
     let mut i = 2;
     while i < 8 {
-        p.swap(i, i+1);
+        p.swap(i, i + 1);
         i += 2;
     }
     p
@@ -109,16 +109,16 @@ impl Packet for ICMPPacket {
     fn packet(&self) -> &[u8] {
         // this is just about looking at the struct as a &[u8].
         // Because ICMPPacket struct *is actually* [u8; 8] (fixed lenght),
-        // there may be a way not to use unsafe code here. 
+        // there may be a way not to use unsafe code here.
         // ***searching...
         unsafe {
             // # SAFETY
-            // mem::size_of::<ICMPPacket>() is a multiple of mem::size_of::<u8>(), 
+            // mem::size_of::<ICMPPacket>() is a multiple of mem::size_of::<u8>(),
             // so that's okay (right?)
             let p = slice::from_raw_parts_mut(
-            self as *const _ as *mut u8, 
-            8 //mem::size_of::<Self>()
-            ); 
+                self as *const _ as *mut u8,
+                8, //mem::size_of::<Self>()
+            );
             // this gives us 'inverted' low and high parts of
             // u16, because we're little-endian!
             restore_correct_order(p)
@@ -136,6 +136,7 @@ fn compute_checksum(tos: u8, code: u8, identifier: u16, sequence_number: u16) ->
     /* From RFC 792: "The checksum is the 16-bit ones's complement of the one's
     complement sum of the ICMP message starting with the ICMP Type.
     For computing the checksum, the checksum field should be zero. */
+    
     let [id_1, id_2] = split_u16_into_u8(identifier);
     let [seq_1, seq_2] = split_u16_into_u8(sequence_number);
     let split = internet_checksum::checksum(&[tos, code, id_1, id_2, seq_1, seq_2]);
