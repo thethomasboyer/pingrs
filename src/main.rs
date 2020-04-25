@@ -36,7 +36,7 @@ fn main() {
         Err(err) => panic!("Error while creating transport channel: {:?}", err),
     };
 
-    let mut counter = 0usize;
+    let mut counter = 0u16;
     println!("Starting the loops");
 
     // start sender/receiver threads
@@ -44,16 +44,16 @@ fn main() {
     let sender_thread = thread::spawn(move ||
         loop {
             // build ICMP echo request (dumb, it's always the same)
-            let echo_request = network::new_echo_request(0);
+            let echo_request = network::new_echo_request(counter);
     
             // send a echo request
             match tx.send_to(echo_request, ip) {
-                Ok(i) => println!("Sent an echo message, with size (?): {}", i),
+                Ok(i) => println!("-> {} bytes sent to {}", i, ip),
                 Err(e) => println!("Error sending echo message: {}", e),
             }
 
-            // increment counter
-            counter += 1;
+            // increment counter without overloading
+            counter = counter.wrapping_add(1);
 
             // pause
             thread::sleep(time::Duration::from_secs(1));

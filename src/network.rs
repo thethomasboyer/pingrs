@@ -86,7 +86,6 @@ fn restore_correct_order(p: &mut [u8]) -> &[u8] {
         p.swap(i, i+1);
         i += 2;
     }
-    println!("DEBUG/// {:?}", p);
     p
 }
 
