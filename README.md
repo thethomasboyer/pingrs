@@ -1,11 +1,13 @@
 # pingrs
-A concurrent implementation of ping in Rust. 
+
+A concurrent implementation of ping in Rust.
 
 Using `pnet`, `rand`, `internet-checksum`, `ctrlc` and `crossbeam-channel`.
 
 *WIP, unfinished, untested, unstable, but Just Works™.*
 
 ## Known problems
+
 * pingrs may need special rights depending on OS.
 * mdev is not computed.
 * panics here and there.
