@@ -3,6 +3,14 @@ name = "pingrs"
 version = "0.1.0"
 authors = ["Thomas Boyer <warbeaver@pm.me>"]
 edition = "2018"
+readme = "README.md"
+repository = "https://github.com/WarmongeringBeaver/pingrs"
+license = "Apache-2.0"
+keywords = ["ping", "cli", "network", "concurrent", "icmp"]
+categories = ["command-line-utilities"]
+
+[badges]
+maintenance = { status = "experimental" }
 
 [dependencies]
 pnet = "0.25.0"
