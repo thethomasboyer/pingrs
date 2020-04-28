@@ -12,11 +12,13 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 
+//! Handle simple I/O tasks.
+
 use std::env;
 use std::net::{IpAddr, Ipv4Addr};
 
-/// Attempt to parse an IP adrress from the command-line arguments.
-/// A bit messy but seems to get the job done for now.
+/// Attempt to parse an IP address (and validate it as one) from the command-line arguments.
+// a bit messy but seems to get the job done for now
 pub fn parse_ip_from_cl() -> Result<IpAddr, String> {
     // collect CL args
     let args: Vec<String> = env::args().collect();

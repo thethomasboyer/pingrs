@@ -12,6 +12,11 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 
+//! Send and receive packets, wrap them around abstractions.
+//!
+//! Duplicates [`pnet`](https://docs.rs/pnet/0.25.0/pnet/) on some points,
+//! but the idea was also to implement some packet handling! *(Why would one re-code* `ping`*, after all?)*
+
 use internet_checksum;
 use pnet::packet::{ip::IpNextHeaderProtocols, Packet};
 use pnet::transport::{
@@ -19,22 +24,26 @@ use pnet::transport::{
 };
 use std::slice;
 
-// buffer receiving packets
+/// Size of the `[u8]` buffer receiving packets.
 const BUFFER_SIZE: usize = 4096;
 
 // ========================================================================================
 //              constants for 'echo' ICMP messages as defined in RFC 792
 // ========================================================================================
+
 // type of service
+/// 'type' attribute for 'echo' requests. See [RFC 792](https://tools.ietf.org/html/rfc792).
 const ECHO_REQUEST_TYPE: u8 = 8;
+/// 'type' attribute for 'echo' replies. See [RFC 792](https://tools.ietf.org/html/rfc792).
 const ECHO_REPLY_TYPE: u8 = 0;
-// code
+/// 'code' attribute for 'echo' messages. See [RFC 792](https://tools.ietf.org/html/rfc792).
 const ECHO_CODE: u8 = 0;
 
 // ========================================================================================
 //          own private implementation of a struct representing an ICMP packet
 // ========================================================================================
-/// Generic ICMP packet, without any additional data.
+
+/// Generic ICMP packet, without any additional payload.
 #[repr(C)] // see https://doc.rust-lang.org/reference/type-layout.html#the-c-representation
 #[derive(Debug)] // keeping the 'rust' representation results in (even) more mess
 pub struct ICMPPacket {
@@ -46,7 +55,8 @@ pub struct ICMPPacket {
 }
 
 impl ICMPPacket {
-    /// Create a ICMPPacket struct from its field values, and computing its checksum.
+    /// Create a [`ICMPPacket`](struct.ICMPPacket.html) struct from its field values,
+    /// and computing its checksum.
     fn new(tos: u8, code: u8, identifier: u16, sequence_number: u16) -> Option<Self> {
         if (tos != ECHO_REQUEST_TYPE && tos != ECHO_REPLY_TYPE) || code != ECHO_CODE {
             return None;
@@ -61,7 +71,7 @@ impl ICMPPacket {
         }
     }
 
-    /// Create a ICMPPacket struct from a raw buffer,
+    /// Create a [`ICMPPacket`](struct.ICMPPacket.html) struct from a raw buffer,
     /// with minimal checking: its lenght must be 8.
     pub fn from_packet(packet: &[u8]) -> Option<Self> {
         if packet.len() != 8 {
@@ -76,8 +86,10 @@ impl ICMPPacket {
 // ========================================================================================
 //          implementation of the 'Packet' trait from pnet for our custom trait
 // ========================================================================================
-/// Custom implementation of the 'Packet' trait for ICMPPacket
-/// in order to be able to send/receive it.
+
+/// Custom implementation of the
+/// [`Packet`](https://docs.rs/pnet/0.25.0/pnet/packet/trait.Packet.html)
+/// trait for [`ICMPPacket`](struct.ICMPPacket.html) in order to be able to send/receive it.
 impl Packet for ICMPPacket {
     /// Retrieve the underlying buffer of the packet.
     fn packet(&self) -> &[u8] {
@@ -99,9 +111,12 @@ impl Packet for ICMPPacket {
         }
     }
 
-    /// Retrieve the payload for the packet. Currently returns a empty array,
-    /// since our custom ICMP packet implementation does not have any
-    /// additional data.
+    /// Retrieve the payload for the packet.
+    ///
+    /// Currently returns a empty array, since our custom [`ICMPPacket`] implementation
+    /// does not have any additional payload.
+    ///
+    /// [`ICMPPacket`]: struct.ICMPPacket.html
     fn payload(&self) -> &[u8] {
         &[] // there's no payload (for now!)
     }
@@ -110,7 +125,10 @@ impl Packet for ICMPPacket {
 // ========================================================================================
 //          create channels which will be in charge of sending and receiving data
 // ========================================================================================
-/// Create two channels, one at layer 4 to send requests, the other at layer 3 to receive replies.
+
+/// Create two channels, one at layer 4 to send requests, the other at layer 3
+/// to receive replies.
+///
 /// Quite clunky.
 pub fn create_transport_gates() -> (TransportSender, TransportReceiver) {
     // working at layer 4 allows us not to manually define the IP headers.
@@ -119,7 +137,7 @@ pub fn create_transport_gates() -> (TransportSender, TransportReceiver) {
     let sending_protocol = TransportProtocol::Ipv4(IpNextHeaderProtocols::Icmp);
     let sender_channel = TransportChannelType::Layer4(sending_protocol);
 
-    // However, for receiving we'll be at layer 3, because we don't want to minimize the use of the
+    // However, for receiving we'll be at layer 3, because we want to minimize the use of the
     // built-in ICMP abstraction from pnet
     let receiver_channel = TransportChannelType::Layer3(IpNextHeaderProtocols::Icmp);
 
@@ -139,6 +157,7 @@ pub fn create_transport_gates() -> (TransportSender, TransportReceiver) {
 // ========================================================================================
 //                                          utils
 // ========================================================================================
+
 //         a                     b
 //     +--------+           +--------+
 //     |XXXXXXXX|           |YYYYYYYY|
@@ -160,20 +179,21 @@ pub fn create_transport_gates() -> (TransportSender, TransportReceiver) {
 //             +---------+------+
 //             |XXXXXXXXYYYYYYYY|
 //             +----------------+
-/// Concatenate two u8's into a u16, first argument is positionned at left.
+/// Concatenate two `u8`s into a `u16`, first argument is left-positionned.
 fn concatenate_u8_into_u16(a: u8, b: u8) -> u16 {
     ((a as u16) << 8) | (b as u16)
 }
 
-/// Split a u16 into two u8's, left bits form first returned integer.
+/// Split a `u16` into two `u8`s, left bits form first returned integer.
 fn split_u16_into_u8(int: u16) -> [u8; 2] {
     let left = (int >> 8) as u8;
     let right = ((int << 8) >> 8) as u8;
     [left, right]
 }
 
-/// Swap the even and odd values of an array which are in the range [2, 7]
+/// Swap `n` and `n+1` values of an array which are in the range [2, 7]
 /// (included), without any check.
+///
 /// Yes, there is a function for that.
 fn restore_correct_order(p: &mut [u8]) -> &[u8] {
     let mut i = 2;
@@ -184,7 +204,12 @@ fn restore_correct_order(p: &mut [u8]) -> &[u8] {
     p
 }
 
-/// Compute the checksum of a to-be created ICMPPacket without any data.
+/// Compute the checksum of a to-be created [`ICMPPacket`] without any payload.
+///
+/// Some `u16` to `u8` parsing before using Google's [`internet_checksum`], that's all.
+///
+/// [`ICMPPacket`]: struct.ICMPPacket.html
+/// [`internet_checksum`]: https://docs.rs/internet-checksum/0.2.0/internet_checksum/
 fn compute_checksum(tos: u8, code: u8, identifier: u16, sequence_number: u16) -> u16 {
     let [id_1, id_2] = split_u16_into_u8(identifier);
     let [seq_1, seq_2] = split_u16_into_u8(sequence_number);
@@ -192,7 +217,9 @@ fn compute_checksum(tos: u8, code: u8, identifier: u16, sequence_number: u16) ->
     concatenate_u8_into_u16(split[0], split[1])
 }
 
-/// Create an echo ICMP packet with given sequence number, and no data.
+/// Create an echo [`ICMPPacket`] with given sequence number, and no payload.
+///
+/// [`ICMPPacket`]: struct.ICMPPacket.html
 pub fn new_echo_request(sequence_number: u16) -> ICMPPacket {
     match ICMPPacket::new(
         ECHO_REQUEST_TYPE,
