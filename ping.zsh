@@ -1,3 +1,3 @@
-cargo build;
-sudo setcap cap_net_raw+ep ./target/debug/pingrs;
-cargo run $1;
+cargo build --release;
+sudo setcap cap_net_raw+ep ./target/release/pingrs;
+cargo run --release $1;
