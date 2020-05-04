@@ -79,7 +79,7 @@ impl ICMPPacket {
     pub fn from_packet(packet: &[u8]) -> Option<Self> {
         if packet.len() != 8 {
             return None;
-        } // wrong lenght of received packet
+        } // wrong lenght of received packet, because not sent by us, or wrongly returned
         let identifier = concatenate_u8_into_u16(packet[4], packet[5]);
         let sequence_number = concatenate_u8_into_u16(packet[6], packet[7]);
         ICMPPacket::new(packet[0], packet[1], identifier, sequence_number)

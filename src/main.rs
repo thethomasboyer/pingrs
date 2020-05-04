@@ -44,6 +44,11 @@ use std::{
 mod io;
 mod network;
 
+/// Delay before sending each echo request, in *ms*.
+///
+/// Technically, it's the delay `pingrs` wait for a SIGINT, before looping.
+const PING_DELAY: u64 = 1000;
+
 // ========================================================================================
 //                  structs to handle statistics printed at program end
 // ========================================================================================
@@ -145,10 +150,11 @@ fn send_echo_request(
     }
 }
 
-/// Interpret received ICMP packets as [`ICMPPacket`] instances, and call
-/// [`get_info_about_reply`](fn.get_info_about_reply.html).
+/// Wait until the next received ICMP packet, interpret it as a
+/// [`ICMPPacket`](network/struct.ICMPPacket.html) instance,
+/// and call [`get_info_about_reply`](fn.get_info_about_reply.html).
 ///
-/// [`ICMPPacket`]: network/struct.ICMPPacket.html
+/// Will block until an ICMP packet is received, and successfully interpreted.
 fn listen_to_echo_reply(
     iter: &mut Ipv4TransportChannelIterator,
     time_data: &Arc<Mutex<Vec<TimeData>>>,
@@ -163,14 +169,16 @@ fn listen_to_echo_reply(
             // try to create a ICMPPacket from the raw bytes of the IP packet payload
             // (the received ICMP packet!)
             match network::ICMPPacket::from_packet(ip_packet.payload()) {
+                // print relevant info and update live data
                 Some(valid_icmp_packet) => get_info_about_reply(
                     time_data,
                     valid_icmp_packet,
                     ip_source_addr,
                     live_data,
                     rec_count,
-                ), // print relevant info and update live data
-                None => print!("Error reading echo reply packet"),
+                ),
+                // wait for another packet
+                None => listen_to_echo_reply(iter, time_data, live_data, rec_count),
             };
         }
         Err(err) => {
@@ -305,8 +313,8 @@ fn main() {
             }
             sent_count += 1;
 
-            // wait for SIGINT for 1s
-            match receiver2.recv_timeout(Duration::from_secs(1)) {
+            // wait for SIGINT for PING_DELAY
+            match receiver2.recv_timeout(Duration::from_millis(PING_DELAY)) {
                 Ok(-1isize) => {
                     let _ = sender2.send(sent_count as isize);
                     break;
@@ -334,8 +342,8 @@ fn main() {
                 }
                 rec_count += 1;
 
-                // wait for SIGINT for 1s and print stats if received
-                match receiver.recv_timeout(Duration::from_secs(1)) {
+                // wait for SIGINT for PING_DELAY / 2 and print stats if received
+                match receiver.recv_timeout(Duration::from_millis(PING_DELAY / 2)) {
                     Ok(count) => {
                         let stats = StatsData::new(ip, count as u16, rec_count, &mut live_data);
                         final_print(stats);

@@ -32,7 +32,6 @@ pub fn get_target_from_cl() -> Result<IpAddr, String> {
     // get the first (second :) one as a &String
     let arg: &String = args.get(1).expect("No CL argument given!");
 
-    //
     match parse_ip_from_cl(arg) {
         Ok(ip) => Ok(ip),
         Err(s1) => match resolve_url_from_cl(arg) {
