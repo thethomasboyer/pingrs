@@ -17,6 +17,9 @@ limitations under the License. */
 //! Duplicates [`pnet`](https://docs.rs/pnet/0.25.0/pnet/) on some points,
 //! but the idea was also to implement some packet handling! *(Why would one re-code* `ping`*, after all?)*
 
+#![deny(missing_docs)]
+#![warn(private_doc_tests)]
+
 use internet_checksum;
 use pnet::packet::{ip::IpNextHeaderProtocols, Packet};
 use pnet::transport::{

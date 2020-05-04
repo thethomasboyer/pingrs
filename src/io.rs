@@ -14,20 +14,39 @@ limitations under the License. */
 
 //! Handle simple I/O tasks.
 
+#![deny(missing_docs)]
+#![warn(private_doc_tests)]
+
 use std::env;
 use std::net::{IpAddr, Ipv4Addr};
+use trust_dns_resolver::{
+    config::{ResolverConfig, ResolverOpts},
+    lookup_ip::LookupIp,
+    Resolver,
+};
 
-/// Attempt to parse an IP address (and validate it as one) from the command-line arguments.
-// a bit messy but seems to get the job done for now
-pub fn parse_ip_from_cl() -> Result<IpAddr, String> {
+pub fn get_target_from_cl() -> Result<IpAddr, String> {
     // collect CL args
     let args: Vec<String> = env::args().collect();
 
-    // get the first (second?) one as a &String
-    let raw_addr: &String = args.get(1).expect("No CL argument given!");
+    // get the first (second :) one as a &String
+    let arg: &String = args.get(1).expect("No CL argument given!");
 
-    // parse it into a [u8; 4]
-    let addr: Vec<&str> = raw_addr.split(".").collect();
+    //
+    match parse_ip_from_cl(arg) {
+        Ok(ip) => Ok(ip),
+        Err(s1) => match resolve_url_from_cl(arg) {
+            Ok(ip) => Ok(ip),
+            Err(s2) => Err(format!("unknown IP or URL ({} and {})", s1, s2)),
+        },
+    }
+}
+
+/// Attempt to parse an IP address (and validate it as one) from the command-line arguments.
+// a bit messy but seems to get the job done for now
+fn parse_ip_from_cl(arg: &String) -> Result<IpAddr, String> {
+    // parse the first arg into a [u8; 4]
+    let addr: Vec<&str> = arg.split(".").collect();
 
     // get the address' numbers
     let mut valid_addr = [0u8; 4];
@@ -43,6 +62,7 @@ pub fn parse_ip_from_cl() -> Result<IpAddr, String> {
                 return Err(msg);
             }
         };
+
         // parse it to u8
         let tmp_parsed: u8 = match tmp_get.parse::<u8>() {
             Ok(num) => num,
@@ -60,6 +80,7 @@ pub fn parse_ip_from_cl() -> Result<IpAddr, String> {
             Some(_) => return Err("More than 5 '.'-separated numbers found".to_string()),
             None => (),
         }
+
         // 4 u8's = valid IPv4 address (RFC 791)
         valid_addr[i] = tmp_parsed;
     }
@@ -67,4 +88,40 @@ pub fn parse_ip_from_cl() -> Result<IpAddr, String> {
     // convert it to a std IP adress, for convenience and correctness
     let ip = IpAddr::V4(Ipv4Addr::from(valid_addr));
     Ok(ip)
+}
+
+fn resolve_url_from_cl(arg: &String) -> Result<IpAddr, String> {
+    // use Cloudflare's resolver, otherwise switch to system conf
+    let resolver = match Resolver::new(ResolverConfig::cloudflare(), ResolverOpts::default()) {
+        Ok(res) => res,
+        Err(err) => {
+            println!("Could not use use Cloudfare's DNS resolver: {}", err);
+            println!("Switching to default host system configuration");
+            Resolver::from_system_conf()
+                .expect("An error occured while using default host system configuration")
+        }
+    };
+
+    // resolve URL
+    let response: LookupIp;
+    match resolver.lookup_ip(arg) {
+        Ok(resp) => response = resp,
+        Err(err) => {
+            let msg = format!("Could not resolve given URL: {}", err);
+            return Err(msg);
+        }
+    }
+
+    // get the first Ipv4 address given
+    let mut ip_addr = response.iter().next();
+    while ip_addr != None {
+        if ip_addr.unwrap().is_ipv4() {
+            println!("(resolved {} as {})", arg, ip_addr.unwrap());
+            return Ok(ip_addr.unwrap());
+        } else {
+            ip_addr = response.iter().next()
+        }
+    }
+
+    return Err("No Ipv4 address found for this URL".to_string());
 }

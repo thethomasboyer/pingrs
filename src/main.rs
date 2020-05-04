@@ -37,7 +37,7 @@ use std::{
     sync::{Arc, Mutex},
     thread,
     time::Duration,
-    time::SystemTime,
+    time::Instant,
     vec::Vec,
 };
 
@@ -52,7 +52,7 @@ mod network;
 #[allow(dead_code)] // looks like rustc can't tell it's being used. Or is it me?
 struct TimeData {
     sequence_number: u16,
-    time_of_request: SystemTime,
+    time_of_request: Instant,
 }
 
 /// Data to be printed at programm end.
@@ -61,47 +61,58 @@ struct StatsData {
     nb_req: u16,
     nb_rep: u16,
     loss: f32,
-    min: u128,
-    avg: f32,
-    max: u128,
-    mdev: f32,
+    min: Duration,
+    avg: Duration,
+    max: Duration,
+    stdev: f32,
 }
 
 impl StatsData {
     /// Compute relevant data and create a new StatsData with it.
-    pub fn new(ip: IpAddr, sent_count: u16, rec_count: u16, live_dat: &mut LiveData) -> StatsData {
+    pub fn new(ip: IpAddr, sent_count: u16, rec_count: u16, live_data: &mut LiveData) -> StatsData {
         let loss = 100f32 - 100f32 * (rec_count as f32) / (sent_count as f32);
-        let mdev = 0f32;
+        let stdev = (live_data.mean_sq - (live_data.avg.as_micros().pow(2) as f32)).sqrt();
         StatsData {
             ip,
             nb_req: sent_count,
             nb_rep: rec_count,
             loss,
-            min: live_dat.min,
-            avg: live_dat.avg,
-            max: live_dat.max,
-            mdev,
+            min: live_data.min,
+            avg: live_data.avg,
+            max: live_data.max,
+            stdev,
         }
     }
 }
 
 /// Data to be updated at each packet reception.
 pub struct LiveData {
-    min: u128,
-    max: u128,
-    avg: f32,
+    /// Minimum RTT.
+    min: Duration,
+    /// Maximum RTT.
+    max: Duration,
+    /// Rolling-average RTT.
+    avg: Duration,
+    /// Mean of squares of RTTs.
+    mean_sq: f32,
 }
 
 impl LiveData {
     /// Update a (the) [`LiveData`](struct.LiveData.html) instance with
     /// provided RTT and reception counter.
-    fn update(&mut self, time: u128, rec_count_f32: f32) {
+    fn update(&mut self, time: Duration, rec_count: u16) {
+        // update min and max
         if time < self.min {
             self.min = time
         } else if time > self.max {
             self.max = time
         }
-        self.avg = (self.avg * (rec_count_f32) + (time as f32)) / (rec_count_f32 + 1.);
+        // update avg
+        self.avg = (self.avg * (rec_count as u32) + time) / ((rec_count + 1) as u32);
+        // update mean_sq
+        // st_dev will not get better than µs-precision, no big deal
+        let rtt_squrd = time.as_micros().pow(2) as f32;
+        self.mean_sq = self.mean_sq.mul_add(rec_count as f32, rtt_squrd) / ((rec_count + 1) as f32);
     }
 }
 
@@ -127,7 +138,7 @@ fn send_echo_request(
             let mut data = time_data.lock().unwrap();
             data.push(TimeData {
                 sequence_number: seq,
-                time_of_request: SystemTime::now(),
+                time_of_request: Instant::now(),
             });
         }
         Err(e) => println!("Error sending echo message: {}", e),
@@ -168,6 +179,10 @@ fn listen_to_echo_reply(
     }
 }
 
+// ========================================================================================
+//                                          utils
+// ========================================================================================
+
 /// Print source IP address, sequence number and RTT,
 /// and [`update`](struct.LiveData.html#method.update) live data.
 fn get_info_about_reply(
@@ -183,33 +198,41 @@ fn get_info_about_reply(
     let seq = icmp_msg.sequence_number as usize;
 
     // compute the RTT
-    let time = match SystemTime::now().duration_since(data[seq].time_of_request) {
-        Ok(n) => n.as_millis(),
-        Err(_) => 0u128,
-    };
+    let time = data[seq].time_of_request.elapsed();
 
     // update live data and print info about the received echo reply
-    live_data.update(time, rec_count as f32);
+    live_data.update(time, rec_count);
 
     // pretty print
     println!(
-        "Echo reply from {}: ICMP seq n°{}, RTT: {}ms",
-        ip_addr, icmp_msg.sequence_number, time
+        "Echo reply from {}: ICMP seq n°{}, RTT: {:?}",
+        ip_addr,
+        icmp_msg.sequence_number + 1,
+        format_time(time)
     );
 }
 
 /// Print statistics on SIGINT call.
 fn final_print(stats: StatsData) {
-    println!("\n### {} PING statistics ###", stats.ip);
+    println!("\n=== {} PING statistics ===", stats.ip);
     println!(
         "Requests sent: {}\nReplies received: {}\nPacket loss: {}%",
         stats.nb_req, stats.nb_rep, stats.loss
     );
     println!(
-        "RTT (ms): min: {} / avg: {} / max: {} / mdev: {}",
-        stats.min, stats.avg, stats.max, stats.mdev
+        "RTT: min: {:?} / avg: {:?} / max: {:?} / mdev: {:?}",
+        format_time(stats.min),
+        format_time(stats.avg),
+        format_time(stats.max),
+        format_time(Duration::from_micros(stats.stdev.round() as u64))
     );
-    println!("(mdev isn't computed yet :)")
+}
+
+// Truncate a duration to µs precision, for displaying purpose.
+fn format_time(d: Duration) -> Duration {
+    let d_microsec_part = d.subsec_micros();
+    let d_whole_sec = d.as_secs();
+    Duration::new(d_whole_sec, d_microsec_part * 1000)
 }
 
 // ========================================================================================
@@ -221,7 +244,7 @@ fn final_print(stats: StatsData) {
 fn main() {
     /***************************** get IP to ping by CL args *****************************/
 
-    let ip = match io::parse_ip_from_cl() {
+    let ip = match io::get_target_from_cl() {
         Ok(addr) => addr,
         Err(s) => {
             panic!("Error parsing CL arguments: {}", s);
@@ -242,9 +265,10 @@ fn main() {
     let mut rec_count: u16 = 0u16;
     // initialise live data
     let mut live_data = LiveData {
-        min: u128::MAX, // max RTT
-        max: 0u128,     // min RTT
-        avg: 0f32,      // average RTT
+        min: Duration::new(u64::MAX, 999_999_999), // max RTT
+        max: Duration::new(0, 0),                  // min RTT
+        avg: Duration::new(0, 0),                  // average RTT
+        mean_sq: 0f32,                             // mean of squares of RTTs
     };
 
     /******************************** handle concurrency *********************************/
@@ -265,7 +289,7 @@ fn main() {
 
     /*********************************** start pinging ***********************************/
 
-    println!("### Pinging {} ###", ip);
+    println!("=== Pinging {} ===", ip);
     // start sender thread
     {
         let time_data = Arc::clone(&time_data);
@@ -280,7 +304,6 @@ fn main() {
                 break;
             }
             sent_count += 1;
-            println!("DEBUG /// {}", sent_count);
 
             // wait for SIGINT for 1s
             match receiver2.recv_timeout(Duration::from_secs(1)) {
