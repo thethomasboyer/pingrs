@@ -15,10 +15,11 @@ limitations under the License. */
 //! Send and receive packets, wrap them around abstractions.
 //!
 //! Duplicates [`pnet`](https://docs.rs/pnet/0.25.0/pnet/) on some points,
-//! but the idea was also to implement some packet handling! *(Why would one re-code* `ping`*, after all?)*
+//! but the idea was also to implement some packet handling!
+//! *(Why would one re-code* `ping`*, after all?)*
 
-#![deny(missing_docs)]
-#![warn(private_doc_tests)]
+#![warn(missing_docs)]
+#![warn(intra_doc_link_resolution_failure)]
 
 use internet_checksum;
 use pnet::packet::{ip::IpNextHeaderProtocols, Packet};
@@ -47,6 +48,8 @@ const ECHO_CODE: u8 = 0;
 // ========================================================================================
 
 /// Generic ICMP packet, without any additional payload.
+///
+/// Reference: [RFC 792](https://tools.ietf.org/html/rfc792)
 #[repr(C)] // see https://doc.rust-lang.org/reference/type-layout.html#the-c-representation
 #[derive(Debug)] // keeping the 'rust' representation results in (even) more mess
 pub struct ICMPPacket {

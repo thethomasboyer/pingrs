@@ -18,13 +18,13 @@ limitations under the License. */
 //!
 //! ### WIP:
 //! * Currently only supports Ipv4 addresses
-//! * Untested, unstable
+//! * Reported RTTs may become unreliable on a long run
 //!
 //! ### Notable reference:
 //! * [RFC 792](https://tools.ietf.org/html/rfc792)
 
-#![deny(missing_docs)]
-#![warn(private_doc_tests)]
+#![warn(missing_docs)]
+#![warn(intra_doc_link_resolution_failure)]
 
 use crossbeam_channel;
 use ctrlc;
@@ -48,20 +48,31 @@ mod network;
 ///
 /// Technically, it's the delay `pingrs` wait for a SIGINT, before starting again the
 /// sending loop.
-const PING_DELAY: u64 = 1000;
-
-// should always be less than PING_DELAY! Otherwise everything is broken...
+///
+/// [`REPLY_SIGINT_DELAY`] + [`REPLY_TIMEOUT`] must **always** equal `PING_DELAY`,
+/// otherwise everything *(RTT computation)* is broken (faster...)
+const PING_DELAY: u64 = 999;
+/// Delay before considering the last packet sent as lost, in *ms*.
+///
+/// [`REPLY_SIGINT_DELAY`] + `REPLY_TIMEOUT` must **always** equal [`PING_DELAY`],
+/// otherwise everything *(RTT computation)* is broken (faster...)
+///
 const REPLY_TIMEOUT: u64 = 2 * PING_DELAY / 3;
-const SIGINT_DELAY: u64 = PING_DELAY / 3;
+/// Delay to wait for a SIGINT in the reply loop, in *ms*.
+///
+/// `REPLY_SIGINT_DELAY` + [`REPLY_TIMEOUT`] must **always** equal [`PING_DELAY`],
+/// otherwise everything *(RTT computation)* is broken (faster...)
+const REPLY_SIGINT_DELAY: u64 = PING_DELAY / 3;
 
 // ========================================================================================
 //                  structs to handle statistics printed at program end
 // ========================================================================================
 
-/// Link a request (identified by its sequence number) to the time it was sent.
+/// Link a request to the time it was sent.
 #[allow(dead_code)] // looks like rustc can't tell it's being used. Or is it me?
 struct TimeData {
     sequence_number: u16,
+    /// Timestamp of the instant the request was sent.
     time_of_request: Instant,
     identifier: u16,
 }
@@ -80,7 +91,7 @@ struct StatsData {
 
 impl StatsData {
     /// Compute relevant data and create a new StatsData with it.
-    pub fn new(ip: IpAddr, sent_count: u16, rec_count: u16, live_data: &mut LiveData) -> StatsData {
+    fn new(ip: IpAddr, sent_count: u16, rec_count: u16, live_data: &mut LiveData) -> StatsData {
         let loss = 100f32 - 100f32 * (rec_count as f32) / (sent_count as f32);
         let stdev = (live_data.mean_sq - (live_data.avg.as_micros().pow(2) as f32)).sqrt();
         StatsData {
@@ -177,6 +188,7 @@ fn wait_for_valid_echo_reply_with_timeout(
     // when received, save a timestamp
     let delay = Instant::now();
     // validate the received request
+    // also, match madness, ft. indentation fury
     match next_packet {
         Ok(packet) => match packet {
             Some(p) => {
@@ -211,6 +223,20 @@ fn wait_for_valid_echo_reply_with_timeout(
     }
 }
 
+// ========================================================================================
+//                                          utils
+// ========================================================================================
+
+/// Check if a received echo reply corresponds to a sent echo request.
+///
+/// If true, return its sequence number and [`time_of_request`]
+/// for printing purpose.
+///
+/// Link between replies and requests is made by comparing their (randomly-generated and
+/// identically-returned) [`identifier`] field.
+///
+/// [`time_of_request`]: struct.TimeData.html#structfield.time_of_request
+/// [`identifier`]: network/struct.ICMPPacket.html#structfield.identifier
 fn validate_ip_packet(
     ip_packet: Ipv4Packet,
     time_data: &Arc<Mutex<Vec<TimeData>>>,
@@ -226,16 +252,13 @@ fn validate_ip_packet(
             // check identifiers
             if data[seq].identifier != valid_icmp_packet.identifier {
                 return None;
+            } else {
+                return Some((seq, data[seq].time_of_request));
             }
-            return Some((seq, data[seq].time_of_request));
         }
         None => None,
     }
 }
-
-// ========================================================================================
-//                                          utils
-// ========================================================================================
 
 /// Print source IP address, sequence number and RTT,
 /// and [`update`](struct.LiveData.html#method.update) live data.
@@ -277,7 +300,7 @@ fn final_print(stats: StatsData) {
     );
 }
 
-// Truncate a duration to µs precision, for displaying purpose.
+/// Truncate a duration to µs precision, for displaying purpose.
 fn format_time(d: Duration) -> Duration {
     let d_microsec_part = d.subsec_micros();
     let d_whole_sec = d.as_secs();
@@ -288,9 +311,17 @@ fn format_time(d: Duration) -> Duration {
 //                                           main
 // ========================================================================================
 
-/// Start `pingrs`, handling threads and responding to SIGINT signal to print
-/// final ping statistics.
+/// Start `pingrs`.
+///
+/// Handle threads and respond to SIGINT signals to print final ping statistics.
 fn main() {
+    /**************************** check loops synchronization ****************************/
+    // this is fundamental, as reported RTTs will be complitely off without proper sync
+    assert_eq!(
+        PING_DELAY,
+        REPLY_SIGINT_DELAY + REPLY_TIMEOUT,
+        "Fatal error: sender and receiver loops are not synchronized"
+    );
     /***************************** get IP to ping by CL args *****************************/
 
     let ip = match io::get_target_from_cl() {
@@ -391,7 +422,7 @@ fn main() {
                 }
 
                 // wait for SIGINT for SIGINT_DELAY and print stats if received
-                match receiver.recv_timeout(Duration::from_millis(SIGINT_DELAY)) {
+                match receiver.recv_timeout(Duration::from_millis(REPLY_SIGINT_DELAY)) {
                     Ok(count) => {
                         let stats = StatsData::new(ip, count as u16, rec_count, &mut live_data);
                         final_print(stats);

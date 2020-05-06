@@ -14,8 +14,8 @@ limitations under the License. */
 
 //! Handle simple I/O tasks.
 
-#![deny(missing_docs)]
-#![warn(private_doc_tests)]
+#![warn(missing_docs)]
+#![warn(intra_doc_link_resolution_failure)]
 
 use std::env;
 use std::net::{IpAddr, Ipv4Addr};
@@ -25,6 +25,8 @@ use trust_dns_resolver::{
     Resolver,
 };
 
+/// Find the IP address corresponding to the command-line arguments, either by parsing it
+/// directly or by resolving a URL.
 pub fn get_target_from_cl() -> Result<IpAddr, String> {
     // collect CL args
     let args: Vec<String> = env::args().collect();
@@ -41,7 +43,7 @@ pub fn get_target_from_cl() -> Result<IpAddr, String> {
     }
 }
 
-/// Attempt to parse an IP address (and validate it as one) from the command-line arguments.
+/// Parse an IP address (and validate it as one) from the command-line arguments.
 // a bit messy but seems to get the job done for now
 fn parse_ip_from_cl(arg: &String) -> Result<IpAddr, String> {
     // parse the first arg into a [u8; 4]
@@ -89,6 +91,7 @@ fn parse_ip_from_cl(arg: &String) -> Result<IpAddr, String> {
     Ok(ip)
 }
 
+/// Resolve a URL given as command-line argument.
 fn resolve_url_from_cl(arg: &String) -> Result<IpAddr, String> {
     // use Cloudflare's resolver, otherwise switch to system conf
     let resolver = match Resolver::new(ResolverConfig::cloudflare(), ResolverOpts::default()) {
