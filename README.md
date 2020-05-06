@@ -4,8 +4,6 @@ A concurrent implementation of `ping` in Rust.
 
 *WIP (untested, maybe unstable, but Just Works™).*
 
----
-
 ## Usage
 
 ### Linux
@@ -22,14 +20,10 @@ TBD
 
 TBD w/ pain
 
----
-
 ## Known problems
 
 * `pingrs` may need special rights depending on OS.
 * **more importantly, current use of `pnet` is weird, as `pingrs` re-implements its own ICMP abstraction, but still makes use of `pnet`'s implementation to send/receive packets.**
-
----
 
 ## Dependencies
 

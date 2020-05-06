@@ -168,10 +168,11 @@ fn send_echo_request(
         Err(e) => println!("Error sending echo message: {}", e),
     }
 }
-
-/// Wait until the next received ICMP packet is successfully interpreted
+/// Wait for a valid reply to be received, but no longer than [`REPLY_TIMEOUT`].
+///
+/// If the received ICMP packet is successfully interpreted
 /// as a [`ICMPPacket`](network/struct.ICMPPacket.html) instance and
-/// successfully linked to a previous echo request sent by us. Then
+/// successfully linked to a previous echo request sent by us,
 /// call [`print_and_update`](fn.print_and_update.html).
 ///
 /// Will block the thread for `reply_timeout` if no received packet meets
