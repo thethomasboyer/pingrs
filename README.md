@@ -10,7 +10,7 @@ A concurrent implementation of `ping` in Rust.
 
 ### Linux
 
-`ping.zsh` builds, sets relevant file capabilities (needs `sudo` for that), and runs the `release` version of `pingrs`. 
+`ping.zsh` builds, sets relevant file capabilities (needs `sudo` for that), and runs the `release` version of `pingrs`.
 
 `ping-debug.zsh` does the same, in debug mode.
 
