@@ -51,7 +51,7 @@ mod network;
 const PING_DELAY: u64 = 3000;
 
 // should always be less than PING_DELAY! Otherwise everything is broken...
-const REPLY_TIMEOUT: u64 = 1500;
+const REPLY_TIMEOUT: u64 = PING_DELAY / 2;
 
 // ========================================================================================
 //                  structs to handle statistics printed at program end
@@ -160,7 +160,7 @@ fn send_echo_request(
 /// Wait until the next received ICMP packet is successfully interpreted
 /// as a [`ICMPPacket`](network/struct.ICMPPacket.html) instance and
 /// successfully linked to a previous echo request sent by us. Then
-/// call [`get_info_about_reply`](fn.get_info_about_reply.html).
+/// call [`print_and_update`](fn.print_and_update.html).
 ///
 /// Will block the thread for `reply_timeout` if no received packet meets
 /// the aforementioned conditions.
@@ -171,17 +171,16 @@ fn wait_for_valid_echo_reply_with_timeout(
     rec_count: u16,
     reply_timeout: Duration,
 ) -> bool {
-    /*  // wait for next ICMP packet to be received, but for no more than reply_timeout
+    // wait for next ICMP packet to be received, but for no more than reply_timeout
     let debug_t = Instant::now();
     let next_packet = iter.next_with_timeout(reply_timeout);
     println!("DEBUG/// timeout: {:?}", debug_t.elapsed());
     // when received, save a timestamp
     let delay = Instant::now();
-    // validate the received request */
-    match iter.next_with_timeout(reply_timeout) {
+    // validate the received request
+    match next_packet {
         Ok(packet) => match packet {
             Some(p) => {
-                let delay = Instant::now(); ////////// DEBUG //////////
                 let (ip_packet, ip_source_addr) = p;
                 // check if reply can be linked to one of our requests
                 match validate_ip_packet(ip_packet, time_data) {
@@ -195,7 +194,7 @@ fn wait_for_valid_echo_reply_with_timeout(
                             iter, time_data, live_data, rec_count, d,
                         ),
                         None => {
-                            //eprintln!("DEBUG/// timeout in relooop");
+                            eprintln!("DEBUG/// timeout in relooop");
                             eprintln!("Reached timeout waiting for echo request");
                             return false;
                         }
@@ -226,7 +225,7 @@ fn validate_ip_packet(
             let data = time_data.lock().unwrap();
             let seq = valid_icmp_packet.sequence_number as usize;
 
-            // check checksums
+            // check checksums /// WRONG VALIDATION -> GO SEE HOW TO VALIDATE DUMMY
             if data[seq].checksum != valid_icmp_packet.checksum {
                 return None;
             }
@@ -376,7 +375,7 @@ fn main() {
             // iterate over on-the-go received IPv4 packets
             let mut iter = ipv4_packet_iter(&mut rx);
             loop {
-                // listen to echo reply (actually any ICMP packet for now)
+                // listen to echo replies, stop if reply is valid or timeout is reached
                 let received_valid_reply = wait_for_valid_echo_reply_with_timeout(
                     &mut iter,
                     &time_data,
