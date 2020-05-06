@@ -17,7 +17,7 @@ limitations under the License. */
 //! `pingrs` is a little command-line utility to ping hosts over the network.
 //!
 //! ### WIP:
-//! * Currently only supports Ipv4 addresses, and cannot parse URLs
+//! * Currently only supports Ipv4 addresses
 //! * Untested, unstable
 //!
 //! ### Notable reference:
@@ -29,7 +29,7 @@ limitations under the License. */
 use crossbeam_channel;
 use ctrlc;
 use pnet::{
-    packet::Packet,
+    packet::{ipv4::Ipv4Packet, Packet},
     transport::{ipv4_packet_iter, Ipv4TransportChannelIterator, TransportSender},
 };
 use std::{
@@ -46,8 +46,12 @@ mod network;
 
 /// Delay before sending each echo request, in *ms*.
 ///
-/// Technically, it's the delay `pingrs` wait for a SIGINT, before looping.
-const PING_DELAY: u64 = 1000;
+/// Technically, it's the delay `pingrs` wait for a SIGINT, before starting again the
+/// sending loop.
+const PING_DELAY: u64 = 3000;
+
+// should always be less than PING_DELAY! Otherwise everything is broken...
+const REPLY_TIMEOUT: u64 = 1500;
 
 // ========================================================================================
 //                  structs to handle statistics printed at program end
@@ -58,6 +62,7 @@ const PING_DELAY: u64 = 1000;
 struct TimeData {
     sequence_number: u16,
     time_of_request: Instant,
+    checksum: u16,
 }
 
 /// Data to be printed at programm end.
@@ -136,6 +141,7 @@ fn send_echo_request(
     // build ICMP echo request
     let echo_request = network::new_echo_request(counter);
     let seq = echo_request.sequence_number;
+    let checksum = echo_request.checksum;
 
     // send an echo request
     match tx.send_to(echo_request, ip) {
@@ -144,46 +150,89 @@ fn send_echo_request(
             data.push(TimeData {
                 sequence_number: seq,
                 time_of_request: Instant::now(),
+                checksum,
             });
         }
         Err(e) => println!("Error sending echo message: {}", e),
     }
 }
 
-/// Wait until the next received ICMP packet, interpret it as a
-/// [`ICMPPacket`](network/struct.ICMPPacket.html) instance,
-/// and call [`get_info_about_reply`](fn.get_info_about_reply.html).
+/// Wait until the next received ICMP packet is successfully interpreted
+/// as a [`ICMPPacket`](network/struct.ICMPPacket.html) instance and
+/// successfully linked to a previous echo request sent by us. Then
+/// call [`get_info_about_reply`](fn.get_info_about_reply.html).
 ///
-/// Will block until an ICMP packet is received, and successfully interpreted.
-fn listen_to_echo_reply(
+/// Will block the thread for `reply_timeout` if no received packet meets
+/// the aforementioned conditions.
+fn wait_for_valid_echo_reply_with_timeout(
     iter: &mut Ipv4TransportChannelIterator,
     time_data: &Arc<Mutex<Vec<TimeData>>>,
     live_data: &mut LiveData,
     rec_count: u16,
-) {
-    // wait for next ICMP packet to be received
-    match iter.next() {
-        Ok(packet) => {
-            let (ip_packet, ip_source_addr) = packet;
-
-            // try to create a ICMPPacket from the raw bytes of the IP packet payload
-            // (the received ICMP packet!)
-            match network::ICMPPacket::from_packet(ip_packet.payload()) {
-                // print relevant info and update live data
-                Some(valid_icmp_packet) => get_info_about_reply(
-                    time_data,
-                    valid_icmp_packet,
-                    ip_source_addr,
-                    live_data,
-                    rec_count,
-                ),
-                // wait for another packet
-                None => listen_to_echo_reply(iter, time_data, live_data, rec_count),
-            };
-        }
+    reply_timeout: Duration,
+) -> bool {
+    /*  // wait for next ICMP packet to be received, but for no more than reply_timeout
+    let debug_t = Instant::now();
+    let next_packet = iter.next_with_timeout(reply_timeout);
+    println!("DEBUG/// timeout: {:?}", debug_t.elapsed());
+    // when received, save a timestamp
+    let delay = Instant::now();
+    // validate the received request */
+    match iter.next_with_timeout(reply_timeout) {
+        Ok(packet) => match packet {
+            Some(p) => {
+                let delay = Instant::now(); ////////// DEBUG //////////
+                let (ip_packet, ip_source_addr) = p;
+                // check if reply can be linked to one of our requests
+                match validate_ip_packet(ip_packet, time_data) {
+                    Some(args) => {
+                        let (seq, t) = args;
+                        print_and_update(ip_source_addr, live_data, rec_count, seq, t);
+                        return true;
+                    }
+                    None => match reply_timeout.checked_sub(delay.elapsed()) {
+                        Some(d) => wait_for_valid_echo_reply_with_timeout(
+                            iter, time_data, live_data, rec_count, d,
+                        ),
+                        None => {
+                            //eprintln!("DEBUG/// timeout in relooop");
+                            eprintln!("Reached timeout waiting for echo request");
+                            return false;
+                        }
+                    },
+                }
+            }
+            None => {
+                eprintln!("Reached timeout waiting for echo request");
+                return false;
+            }
+        },
         Err(err) => {
-            println!("Error receiving ICMP packet: {}", err);
+            eprintln!("Error receiving ICMP packet: {}", err);
+            return false;
         }
+    }
+}
+
+fn validate_ip_packet(
+    ip_packet: Ipv4Packet,
+    time_data: &Arc<Mutex<Vec<TimeData>>>,
+) -> Option<(usize, Instant)> {
+    // build an ICMPPacket struct from raw bytes
+    match network::ICMPPacket::from_packet(ip_packet.payload()) {
+        Some(valid_icmp_packet) => {
+            // access the position of the corresponding request in the TimeData vector
+            let time_data = Arc::clone(&time_data);
+            let data = time_data.lock().unwrap();
+            let seq = valid_icmp_packet.sequence_number as usize;
+
+            // check checksums
+            if data[seq].checksum != valid_icmp_packet.checksum {
+                return None;
+            }
+            return Some((seq, data[seq].time_of_request));
+        }
+        None => None,
     }
 }
 
@@ -193,29 +242,24 @@ fn listen_to_echo_reply(
 
 /// Print source IP address, sequence number and RTT,
 /// and [`update`](struct.LiveData.html#method.update) live data.
-fn get_info_about_reply(
-    time_data: &Arc<Mutex<Vec<TimeData>>>,
-    icmp_msg: network::ICMPPacket,
+fn print_and_update(
     ip_addr: IpAddr,
     live_data: &mut LiveData,
     rec_count: u16,
+    seq: usize,
+    t: std::time::Instant,
 ) {
-    // access the position of the corresponding request in the TimeData vector
-    let time_data = Arc::clone(&time_data);
-    let data = time_data.lock().unwrap();
-    let seq = icmp_msg.sequence_number as usize;
-
     // compute the RTT
-    let time = data[seq].time_of_request.elapsed();
+    let time = t.elapsed();
 
-    // update live data and print info about the received echo reply
+    // update live data
     live_data.update(time, rec_count);
 
     // pretty print
     println!(
         "Echo reply from {}: ICMP seq n°{}, RTT: {:?}",
         ip_addr,
-        icmp_msg.sequence_number + 1,
+        seq + 1,
         format_time(time)
     );
 }
@@ -228,7 +272,7 @@ fn final_print(stats: StatsData) {
         stats.nb_req, stats.nb_rep, stats.loss
     );
     println!(
-        "RTT: min: {:?} / avg: {:?} / max: {:?} / mdev: {:?}",
+        "RTT: min: {:?} / avg: {:?} / max: {:?} / stdev: {:?}",
         format_time(stats.min),
         format_time(stats.avg),
         format_time(stats.max),
@@ -333,14 +377,21 @@ fn main() {
             let mut iter = ipv4_packet_iter(&mut rx);
             loop {
                 // listen to echo reply (actually any ICMP packet for now)
-                listen_to_echo_reply(&mut iter, &time_data, &mut live_data, rec_count);
+                let received_valid_reply = wait_for_valid_echo_reply_with_timeout(
+                    &mut iter,
+                    &time_data,
+                    &mut live_data,
+                    rec_count,
+                    Duration::from_millis(REPLY_TIMEOUT),
+                );
 
                 // increment counter without overloading
                 if rec_count == u16::MAX - 1 {
                     println!("Enough...");
                     break;
+                } else if received_valid_reply {
+                    rec_count += 1;
                 }
-                rec_count += 1;
 
                 // wait for SIGINT for PING_DELAY / 2 and print stats if received
                 match receiver.recv_timeout(Duration::from_millis(PING_DELAY / 2)) {

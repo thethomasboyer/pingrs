@@ -52,7 +52,7 @@ const ECHO_CODE: u8 = 0;
 pub struct ICMPPacket {
     tos: u8,
     code: u8,
-    checksum: u16,
+    pub checksum: u16,
     identifier: u16,
     pub sequence_number: u16,
 }
