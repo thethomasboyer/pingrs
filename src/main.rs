@@ -48,10 +48,11 @@ mod network;
 ///
 /// Technically, it's the delay `pingrs` wait for a SIGINT, before starting again the
 /// sending loop.
-const PING_DELAY: u64 = 3000;
+const PING_DELAY: u64 = 1000;
 
 // should always be less than PING_DELAY! Otherwise everything is broken...
-const REPLY_TIMEOUT: u64 = PING_DELAY / 2;
+const REPLY_TIMEOUT: u64 = 2 * PING_DELAY / 3;
+const SIGINT_DELAY: u64 = PING_DELAY / 3;
 
 // ========================================================================================
 //                  structs to handle statistics printed at program end
@@ -62,7 +63,7 @@ const REPLY_TIMEOUT: u64 = PING_DELAY / 2;
 struct TimeData {
     sequence_number: u16,
     time_of_request: Instant,
-    checksum: u16,
+    identifier: u16,
 }
 
 /// Data to be printed at programm end.
@@ -141,7 +142,7 @@ fn send_echo_request(
     // build ICMP echo request
     let echo_request = network::new_echo_request(counter);
     let seq = echo_request.sequence_number;
-    let checksum = echo_request.checksum;
+    let identifier = echo_request.identifier;
 
     // send an echo request
     match tx.send_to(echo_request, ip) {
@@ -150,7 +151,7 @@ fn send_echo_request(
             data.push(TimeData {
                 sequence_number: seq,
                 time_of_request: Instant::now(),
-                checksum,
+                identifier,
             });
         }
         Err(e) => println!("Error sending echo message: {}", e),
@@ -172,9 +173,7 @@ fn wait_for_valid_echo_reply_with_timeout(
     reply_timeout: Duration,
 ) -> bool {
     // wait for next ICMP packet to be received, but for no more than reply_timeout
-    let debug_t = Instant::now();
     let next_packet = iter.next_with_timeout(reply_timeout);
-    println!("DEBUG/// timeout: {:?}", debug_t.elapsed());
     // when received, save a timestamp
     let delay = Instant::now();
     // validate the received request
@@ -194,7 +193,6 @@ fn wait_for_valid_echo_reply_with_timeout(
                             iter, time_data, live_data, rec_count, d,
                         ),
                         None => {
-                            eprintln!("DEBUG/// timeout in relooop");
                             eprintln!("Reached timeout waiting for echo request");
                             return false;
                         }
@@ -225,8 +223,8 @@ fn validate_ip_packet(
             let data = time_data.lock().unwrap();
             let seq = valid_icmp_packet.sequence_number as usize;
 
-            // check checksums /// WRONG VALIDATION -> GO SEE HOW TO VALIDATE DUMMY
-            if data[seq].checksum != valid_icmp_packet.checksum {
+            // check identifiers
+            if data[seq].identifier != valid_icmp_packet.identifier {
                 return None;
             }
             return Some((seq, data[seq].time_of_request));
@@ -392,8 +390,8 @@ fn main() {
                     rec_count += 1;
                 }
 
-                // wait for SIGINT for PING_DELAY / 2 and print stats if received
-                match receiver.recv_timeout(Duration::from_millis(PING_DELAY / 2)) {
+                // wait for SIGINT for SIGINT_DELAY and print stats if received
+                match receiver.recv_timeout(Duration::from_millis(SIGINT_DELAY)) {
                     Ok(count) => {
                         let stats = StatsData::new(ip, count as u16, rec_count, &mut live_data);
                         final_print(stats);

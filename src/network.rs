@@ -52,8 +52,8 @@ const ECHO_CODE: u8 = 0;
 pub struct ICMPPacket {
     tos: u8,
     code: u8,
-    pub checksum: u16,
-    identifier: u16,
+    checksum: u16,
+    pub identifier: u16,
     pub sequence_number: u16,
 }
 
@@ -213,7 +213,7 @@ fn restore_correct_order(p: &mut [u8]) -> &[u8] {
 ///
 /// [`ICMPPacket`]: struct.ICMPPacket.html
 /// [`internet_checksum`]: https://docs.rs/internet-checksum/0.2.0/internet_checksum/
-fn compute_checksum(tos: u8, code: u8, identifier: u16, sequence_number: u16) -> u16 {
+pub fn compute_checksum(tos: u8, code: u8, identifier: u16, sequence_number: u16) -> u16 {
     let [id_1, id_2] = split_u16_into_u8(identifier);
     let [seq_1, seq_2] = split_u16_into_u8(sequence_number);
     let split = internet_checksum::checksum(&[tos, code, id_1, id_2, seq_1, seq_2]);
