@@ -14,7 +14,7 @@ limitations under the License. */
 
 //! Send and receive packets, wrap them around abstractions.
 //!
-//! Duplicates [`pnet`](https://docs.rs/pnet/0.25.0/pnet/) on some points,
+//! Duplicates [`pnet`](https://docs.rs/pnet) on some points,
 //! but the idea was also to implement some packet handling!
 //! *(Why would one re-code* `ping`*, after all?)*
 
