@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.com/WarmongeringBeaver/pingrs.svg?branch=master)](https://travis-ci.com/WarmongeringBeaver/pingrs)
+
 # pingrs
 
 A concurrent implementation of `ping` in Rust.
